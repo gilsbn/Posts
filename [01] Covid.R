@@ -329,7 +329,8 @@ diflog <- function(x, Mult = FALSE, n = 1) {
 
 #==============================================================================
 
-# MODELOS ARIMA
+
+# MODELO DE PREVISÃO DO PIB: 2020-21
 #==========================================================================================================================
 # Estimando (2019-2020) -----------------------------------------
 
@@ -349,21 +350,35 @@ completa <-
             y = season_adjust, 
             d1  = if_else(year(t) == 2020 & quarter(t) == 1, 1, 0), 
             d2  = if_else(year(t) == 2020 & quarter(t) == 2, 1, 0), 
-            dum = if_else(year(t) >= 2015, 1, 0))
+            d3  = if_else(year(t) == 2008 & quarter(t) == 4, 1, 0), 
+            d4  = if_else(year(t) >= 2014, 1, 0))
 
 # Estimando PIB futuro em 2019
 training  <- completa %>% filter(year(t) <= 2019)
-modelos   <- training %>% model(Autom = ARIMA(log(y) ~ pdq(d = 1)))
+modelos   <- 
+  training %>% 
+  model(mod1  = ARIMA(log(y) ~ pdq(d = 1)), 
+        mod2  = ARIMA(log(y) ~ pdq(d = 1) + d3),
+        mod3  = ARIMA(log(y) ~ pdq(d = 1) + d4),
+        mod4  = ARIMA(log(y) ~ pdq(d = 1) + d3 + d4))
 
-modelos %>% report()
 modelos %>% 
+  glance() %>%
+  select(.model, AIC:BIC) %>%
+  arrange(BIC) %>%
+  arrange(AICc)
+
+modelos %>% select(mod2) %>% report()
+
+modelos %>% 
+  select(mod2) %>%
   residuals() %>% 
-  features(.resid, ljung_box, lag = 10, dof = 2) %>% # como especificar número de parâmetros automaticamente?
+  features(.resid, ljung_box, lag = 10, dof = 3) %>% # como especificar número de parâmetros automaticamente?
   arrange(.model)
 
-cenarios <- scenarios(d1 = new_data(training,8) %>% mutate(d1 = rep(1,8)), names_to = "Cenários")
+cenarios <- scenarios(d1 = new_data(training,8) %>% mutate(d3 = rep(0,8)), names_to = "Cenários")
 
-fct  <- modelos %>% forecast(h = 8, new_data = cenarios)
+fct  <- modelos %>% select(mod2) %>% forecast(h = 8, new_data = cenarios)
 
 
 # Previsão (2020-21) --------------------
@@ -400,23 +415,49 @@ fct %>%
   g1 + theme(plot.margin = margin(r = 16, unit = "pt"))
 
 
-# previsão para 2021 -----------------------
+# Previsão alternativa (2020-21) ------------------------------------------
+
+completa <- 
+  decomp %>%
+  transmute(t, 
+            y = season_adjust, 
+            d1  = if_else(year(t) == 2020 & quarter(t) == 1, 1, 0), 
+            d2  = if_else(year(t) == 2020 & quarter(t) == 2, 1, 0), 
+            d3  = if_else(year(t) == 2008 & quarter(t) == 4, 1, 0), 
+            d4  = if_else(year(t) >= 2014, 1, 0))
 
 training2  <- completa %>% filter(year(t) <= 2020)
-modelos2   <- training2 %>% model(Autom = ARIMA(log(y) ~ 1 + d1 + lag(d1,1) + lag(d1,2) + lag(d1,3) + pdq(d = 1)))
+modelos2   <- 
+  training2 %>% 
+  model(mod1  = ARIMA(log(y) ~ 1 + pdq(1,1,0) + PDQ(0,0,0) + d3),
+        mod2  = ARIMA(log(y) ~ 1 + pdq(1,1,0) + PDQ(0,0,0) + d1 + d2 + d3), 
+        mod3  = ARIMA(log(y) ~ 1 + pdq(1,1,0) + PDQ(0,0,0) + d1 + d2 + d3 + lag(d2,1)), 
+        mod4  = ARIMA(log(y) ~ 1 + pdq(1,1,0) + PDQ(0,0,0) + d1 + d2 + d3 + lag(d2,1) + lag(d2,2)),
+        mod5  = ARIMA(log(y) ~ 1 + pdq(1,1,0) + PDQ(0,0,0) + d1 + d2 + d3 + lag(d2,1) + lag(d2,2) + lag(d2,3)))
 
-modelos2 %>% report()
-modelos2 %>% residuals() %>% features(.resid, ljung_box, lag = 10, dof = 6)
+modelos2 %>% 
+  glance() %>%
+  select(.model, AIC:BIC) %>%
+  arrange(BIC) %>%
+  arrange(AICc)
 
-cen1 <- 0.3
-cen2 <- 0.4
-cen3 <- 0.5
+modelos2 %>% select(mod1) %>% report()
+modelos2 %>% select(mod2) %>% report()
+modelos2 %>% select(mod3) %>% report()
+modelos2 %>% select(mod4) %>% report()
+modelos2 %>% select(mod5) %>% report()
+
+modelos2 %>% select(mod2) %>% residuals() %>% features(.resid, ljung_box, lag = 10, dof = 5)
+
+cen1 <- 0
+cen2 <- 0.05
+cen3 <- 0.10
 
 cenarios <- 
   scenarios(
-    c1 = new_data(training2, 4) %>% mutate(d1 = c(cen1,0,0,0)), 
-    c2 = new_data(training2, 4) %>% mutate(d1 = c(cen2,0,0,0)),
-    c3 = new_data(training2, 4) %>% mutate(d1 = c(cen3,0,0,0)),
+    c1 = new_data(training2, 4) %>% mutate(d1 = c(0,0,0,0), d2 = c(cen1,0,0,0), d3 = c(0,0,0,0), d4 = c(1,1,1,1)), 
+    c2 = new_data(training2, 4) %>% mutate(d1 = c(0,0,0,0), d2 = c(cen2,0,0,0), d3 = c(0,0,0,0), d4 = c(1,1,1,1)),
+    c3 = new_data(training2, 4) %>% mutate(d1 = c(0,0,0,0), d2 = c(cen3,0,0,0), d3 = c(0,0,0,0), d4 = c(1,1,1,1)),
     names_to = "Cenários")
 
 # cenarios <-
@@ -426,10 +467,10 @@ cenarios <-
 #     c3 = new_data(training2, 4) %>% mutate(d1 = c(0,0,0,0), d2 = c(cen3,0,0,0)),
 #     names_to = "Cenários")
 
-fct2  <- modelos2 %>% forecast(h = 4, new_data = cenarios)
+fct2  <- modelos2 %>% select(mod2) %>% forecast(h = 4, new_data = cenarios)
 
 
-# Gráfico: previsão 2021 -----------------
+# Gráfico: previsão alternativa 2021 --------------------------------------
 
 graf <- function(aa = 2019) {
   
@@ -497,7 +538,6 @@ graf <- function(aa = 2019) {
 }
 graf(); calculando %>% filter(year(t) >= 2019) %>% print(n=Inf)
 
-
 # Perda acumulada, variações e gaps (2020-21) --------------
 
 x1 <- 
@@ -561,8 +601,8 @@ x3 <-
   mutate(d = ((y/subset(y, k == "y"))-1)*100) %>%
   rename(t = aa, PIB = k, Vol = y, Var = d)
 
-list("Perda acumulada (2020-2021): porcentagem do PIB 2019"    = x1, 
-     "Previsões: Variação anual e Gaps dos cenários em 2021:4" = x2, 
+list("Perda acumulada (2020-2021): porcentagem do PIB 2019" = x1, 
+     "Previsões: Variação e Gaps dos cenários em 2021:4"    = x2, 
      "Taxa de crescimento em 2021" = x3); rm(x1,x2,x3)
 
 
